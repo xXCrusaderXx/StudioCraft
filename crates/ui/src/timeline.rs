@@ -2403,7 +2403,10 @@ fn paint_notes(painter: &Painter, g: &Geo, ev: &Event, area: Rect, color: Color3
             pos2(g.x(a), y),
             pos2(g.x(b).max(g.x(a) + 2.0), y + step.clamp(1.5, 4.0)),
         );
-        painter.rect_filled(r.intersect(area), 0.5, color);
+        // Nur Sichtbares: ein langer Part hat zehntausende Noten.
+        if r.intersects(area) {
+            painter.rect_filled(r.intersect(area), 0.5, color);
+        }
     }
 }
 
