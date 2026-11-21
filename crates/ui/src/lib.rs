@@ -112,6 +112,10 @@ pub use tools::{Grid, Tool};
 const LEFT_DEFAULT: f32 = 200.0 + mixer::COLUMN_W;
 const RIGHT_DEFAULT: f32 = 240.0;
 const LOWER_DEFAULT: f32 = 300.0;
+/// Mindesthöhe der unteren Zone (in niedrigen Fenstern höchstens die Hälfte des Platzes).
+const LOWER_MIN: f32 = 200.0;
+/// So viel Höhe bleibt über der unteren Zone für das Arrangement.
+const PROJECT_MIN: f32 = 120.0;
 
 /// Gespeicherte Zonengröße oder, bei 0, der Standard.
 fn layout_size(saved: f32, default: f32) -> f32 {
@@ -1134,10 +1138,17 @@ impl ProjectWindow {
         side(ui, self);
         let mut zones = focus::ZoneRects::default();
         if self.show_lower {
+            // Die Zone bleibt im Fenster: über ihr bleibt Platz für das Arrangement, in
+            // niedrigen Fenstern wird auch die Mindesthöhe kleiner.
+            let free = ui.available_rect_before_wrap().height();
+            let min = LOWER_MIN.min(free / 2.0).max(0.0);
+            let max = (free - PROJECT_MIN).max(min);
             let r = egui::Panel::bottom(("untere-zone", self.layout_gen))
                 .resizable(true)
-                .default_size(layout_size(self.project.layout.lower_height, LOWER_DEFAULT))
-                .min_size(200.0)
+                .default_size(
+                    layout_size(self.project.layout.lower_height, LOWER_DEFAULT).clamp(min, max),
+                )
+                .size_range(min..=max)
                 .show(ui, |ui| {
                     // Reiter am unteren Rand der Zone, Inhalt darüber (docs/ui-parity.md).
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
@@ -1180,21 +1191,35 @@ impl ProjectWindow {
                             }
                         });
                         ui.separator();
-                        ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
-                            let zone = self.lower;
-                            if self.in_own_window(zone) {
-                                self.own_window_placeholder(ui, zone);
-                                return;
-                            }
-                            match zone {
-                                LowerZone::Mixer => mixer::show(self, ui),
-                                LowerZone::Editor => keyeditor::show(self, ui),
-                                LowerZone::SampleEditor => sampleeditor::show(self, ui),
-                                LowerZone::List => listeditor::show(self, ui),
-                                LowerZone::Score => score::show(self, ui),
-                                LowerZone::AudioPart => audio_part_editor::show(self, ui),
-                            }
-                        });
+                        // Der Inhalt bekommt genau den restlichen Platz der Zone. Braucht er
+                        // mehr (der Mixer hat eine Mindesthöhe), scrollt er, statt die Zone
+                        // unter den Fensterrand zu schieben.
+                        let area = ui.available_rect_before_wrap();
+                        let mut content = ui.new_child(
+                            egui::UiBuilder::new()
+                                .max_rect(area)
+                                .layout(egui::Layout::top_down(egui::Align::LEFT)),
+                        );
+                        content.shrink_clip_rect(area);
+                        egui::ScrollArea::vertical()
+                            .id_salt("untere-zone-inhalt")
+                            .auto_shrink([false, false])
+                            .show(&mut content, |ui| {
+                                let zone = self.lower;
+                                if self.in_own_window(zone) {
+                                    self.own_window_placeholder(ui, zone);
+                                    return;
+                                }
+                                match zone {
+                                    LowerZone::Mixer => mixer::show(self, ui),
+                                    LowerZone::Editor => keyeditor::show(self, ui),
+                                    LowerZone::SampleEditor => sampleeditor::show(self, ui),
+                                    LowerZone::List => listeditor::show(self, ui),
+                                    LowerZone::Score => score::show(self, ui),
+                                    LowerZone::AudioPart => audio_part_editor::show(self, ui),
+                                }
+                            });
+                        ui.allocate_rect(area, egui::Sense::hover());
                     });
                 });
             zones.lower = Some(r.response.rect);
@@ -4628,6 +4653,46 @@ mod tests {
         w.selection = vec![part];
         w.key_editor.part = Some(part);
         part
+    }
+
+    /// Eine hohe untere Zone in einem niedrigen Fenster bleibt im Fenster: Reiter und
+    /// Kanalnamen sichtbar, darüber Platz für das Arrangement.
+    #[test]
+    fn the_lower_zone_stays_inside_a_low_window() {
+        for (height, lower) in [(700.0, 650.0), (560.0, 300.0), (420.0, 200.0)] {
+            let mut w = ProjectWindow::new(Project::demo(20), None, "kein Audio (Test)".into());
+            w.project.layout.lower_height = lower;
+            w.apply_layout(w.project.layout.clone());
+            let mut h = Harness::builder()
+                .with_size(egui::vec2(1200.0, height))
+                .with_step_dt(1.0 / 60.0)
+                .wgpu()
+                .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
+            h.run_steps(4);
+            if let (Ok(dir), Ok(img)) = (std::env::var("STUDIOCRAFT_SHOTS"), h.render()) {
+                img.save(std::path::Path::new(&dir).join(format!("lower_zone_{height}.png")))
+                    .unwrap();
+            }
+            let tab = h.get_by_label("Mixer").rect();
+            let transport = h.get_by_label("Punch-In (I)").rect();
+            assert!(tab.bottom() <= transport.top(), "{height}: tab {tab:?}");
+            // Where the mixer fits, its channel names sit above the tabs; lower down it scrolls.
+            if height >= 560.0 {
+                let name = h.get_by_label("Link-Gruppe von Audio 2").rect();
+                assert!(name.bottom() <= tab.top(), "{height}: name {name:?}");
+            }
+            let lower = h.state().last_zones.lower.expect("lower zone");
+            assert!(
+                lower.bottom() <= transport.top(),
+                "{height}: zone {lower:?}"
+            );
+            let zones = h.state().last_zones;
+            let project = zones.project.expect("project zone");
+            assert!(
+                project.height() >= 60.0,
+                "{height}: arrangement {project:?}"
+            );
+        }
     }
 
     #[test]
