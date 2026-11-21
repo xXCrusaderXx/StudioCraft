@@ -1224,14 +1224,22 @@ impl ProjectWindow {
                 .default_size(default)
                 .min_size(min)
                 .show(ui, |ui| {
+                    // Ist die Zone niedriger als der Kanalzug, scrollt der Kanalzug, statt über
+                    // die Zone in die untere Zone hineinzuragen.
                     let height = ui.available_height();
                     ui.horizontal_top(|ui| {
                         ui.vertical(|ui| {
-                            ui.set_min_height(height);
-                            mixer::channel_column(self, ui);
+                            ui.set_max_height(height);
+                            egui::ScrollArea::vertical()
+                                .id_salt("kanalzug-links")
+                                .auto_shrink([true, false])
+                                .show(ui, |ui| {
+                                    ui.set_min_height(height);
+                                    mixer::channel_column(self, ui);
+                                });
                         });
                         if column {
-                            ui.separator();
+                            ui.add(egui::Separator::default().vertical().shrink(0.0));
                             ui.vertical(|ui| {
                                 egui::ScrollArea::vertical().show(ui, |ui| self.inspector(ui));
                             });
