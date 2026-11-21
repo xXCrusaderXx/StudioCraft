@@ -274,11 +274,9 @@ pub(super) fn show(w: &mut ProjectWindow, ui: &mut Ui, part: EventId, track: usi
     interact(w, ui, &resp, &g, &rws, part, track, &ev.notes);
 
     // Zeichnen: Zeilen, Part-Bereich, Raster, Rauten.
-    let notes = w
-        .project
-        .event(part)
-        .map(|e| e.notes.clone())
-        .unwrap_or_default();
+    let notes: &[Note] = w.project.event(part).map_or(&[], |e| &e.notes);
+    let mut selection = w.key_editor.selection.clone();
+    selection.sort_unstable();
     let p = painter.with_clip_rect(grid);
     let v = ui.visuals().clone();
     p.rect_filled(grid, 0.0, v.extreme_bg_color);
@@ -330,6 +328,10 @@ pub(super) fn show(w: &mut ProjectWindow, ui: &mut Ui, part: EventId, track: usi
         };
         let c = pos2(g.x(ev.start.0 as f64 + n.start as f64), rws.center(row));
         let s = DIAMOND;
+        // Nur sichtbare Rauten: ein Part kann zehntausende Noten haben.
+        if !Rect::from_center_size(c, vec2(2.0 * s, 2.0 * s)).intersects(grid) {
+            continue;
+        }
         let pts = vec![
             pos2(c.x, c.y - s),
             pos2(c.x + s, c.y),
@@ -343,7 +345,7 @@ pub(super) fn show(w: &mut ProjectWindow, ui: &mut Ui, part: EventId, track: usi
         } else {
             fill.gamma_multiply(0.35)
         };
-        let stroke = if w.key_editor.selection.contains(&i) {
+        let stroke = if selection.binary_search(&i).is_ok() {
             Stroke::new(2.0, selected_stroke)
         } else {
             Stroke::new(1.0, Color32::from_black_alpha(160))

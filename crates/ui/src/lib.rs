@@ -54,6 +54,8 @@ mod midiout_ui;
 mod mixer;
 mod noteinfo;
 mod panel_undo;
+#[cfg(test)]
+mod perf_tests;
 mod pre_ui;
 mod processes_ui;
 mod quantize;

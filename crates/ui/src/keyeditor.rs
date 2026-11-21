@@ -451,11 +451,11 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         interact(w, ui, &resp, &g, part, &ev.notes);
     }
 
-    let notes = w
-        .project
-        .event(part)
-        .map(|e| e.notes.clone())
-        .unwrap_or_default();
+    // Nur Sichtbares zeichnen: ein Part kann zehntausende Noten haben (AGENTS.md: Budget je
+    // Bild). Die Noten sind nicht sortiert, also ein linearer Test je Note ohne Kopie.
+    let notes: &[Note] = w.project.event(part).map_or(&[], |e| &e.notes);
+    let mut selection = w.key_editor.selection.clone();
+    selection.sort_unstable();
     let p = painter.with_clip_rect(grid);
     paint_grid(w, &p, &g, ev.start.0, ev.end());
     // Die anderen geöffneten Parts gedimmt darunter.
@@ -474,12 +474,20 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
             ..g
         };
         for n in &o.notes {
-            p.rect_filled(og.note_rect(n), 2.0, c);
+            let rect = og.note_rect(n);
+            if rect.intersects(grid) {
+                p.rect_filled(rect, 2.0, c);
+            }
         }
     }
+    let selected_stroke = Stroke::new(2.0, crate::theme::tokens(p.ctx()).note_selected);
+    let normal_stroke = Stroke::new(1.0, Color32::from_black_alpha(140));
     for (i, n) in notes.iter().enumerate() {
         let rect = g.note_rect(n);
-        let selected = w.key_editor.selection.contains(&i);
+        if !rect.intersects(grid) {
+            continue;
+        }
+        let selected = selection.binary_search(&i).is_ok();
         let inside = n.start >= 0 && n.start < ev.length as i64;
         let fill = color.lerp_to_gamma(Color32::WHITE, 0.1 + 0.4 * f32::from(n.velocity) / 127.0);
         let fill = if inside {
@@ -489,21 +497,15 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         };
         p.rect_filled(rect, 2.0, fill);
         let stroke = if selected {
-            Stroke::new(2.0, crate::theme::tokens(p.ctx()).note_selected)
+            selected_stroke
         } else {
-            Stroke::new(1.0, Color32::from_black_alpha(140))
+            normal_stroke
         };
         p.rect_stroke(rect, 2.0, stroke, StrokeKind::Inside);
     }
     paint_ruler(w, &painter.with_clip_rect(ruler), &g);
     paint_keys(&painter.with_clip_rect(keys), &g, w.key_editor.preview);
-    paint_velocity(
-        &painter.with_clip_rect(vel),
-        &g,
-        &notes,
-        &w.key_editor.selection,
-        color,
-    );
+    paint_velocity(&painter.with_clip_rect(vel), &g, notes, &selection, color);
     let ctrls = w
         .project
         .event(part)
@@ -949,6 +951,7 @@ fn paint_keys(p: &Painter, g: &KGeo, playing: Option<u8>) {
     p.vline(g.keys.right(), g.keys.y_range(), line);
 }
 
+/// `sel`: gewählte Notenindizes, aufsteigend sortiert.
 fn paint_velocity(p: &Painter, g: &KGeo, notes: &[Note], sel: &[usize], color: Color32) {
     let v = p.ctx().global_style().visuals.clone();
     p.rect_filled(g.vel, 0.0, v.extreme_bg_color);
@@ -964,12 +967,18 @@ fn paint_velocity(p: &Painter, g: &KGeo, notes: &[Note], sel: &[usize], color: C
         FontId::proportional(10.0),
         v.weak_text_color(),
     );
+    let selected = crate::theme::tokens(p.ctx()).note_selected;
     for (i, n) in notes.iter().enumerate() {
         let x = g.x(g.part_start as f64 + n.start as f64);
+        // Nur Balken im sichtbaren Bereich (Balken sind 4 px breit).
+        if x + 4.0 < g.vel.left() || x > g.vel.right() {
+            continue;
+        }
         let h = g.vel.height() * f32::from(n.velocity) / 127.0;
         let r = Rect::from_min_max(pos2(x, g.vel.bottom() - h), pos2(x + 4.0, g.vel.bottom()));
-        let c = if sel.contains(&i) {
-            crate::theme::tokens(p.ctx()).note_selected
+        // `sel` ist sortiert.
+        let c = if sel.binary_search(&i).is_ok() {
+            selected
         } else {
             color
         };
