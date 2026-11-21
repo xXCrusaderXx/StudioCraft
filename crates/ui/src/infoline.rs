@@ -46,7 +46,9 @@ fn selected(w: &ProjectWindow) -> Option<(Vec<EventId>, EventId)> {
 }
 
 pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
-    ui.horizontal(|ui| {
+    // Umbrechend: in schmalen Fenstern rutschen die Felder in weitere Zeilen, statt hinter
+    // dem Fensterrand zu verschwinden.
+    ui.horizontal_wrapped(|ui| {
         let Some((ids, id)) = selected(w) else {
             ui.weak(tr("Keine Auswahl"));
             return;
@@ -154,6 +156,21 @@ pub(crate) fn field(
     multi: bool,
 ) -> Option<String> {
     let id = ui.make_persistent_id(("infozeile", label));
+    // Beschriftung und Feld bleiben beim Umbrechen beisammen.
+    let label_width = egui::WidgetText::from(label)
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Body,
+        )
+        .size()
+        .x;
+    let margin = ui.spacing().button_padding.x * 2.0;
+    keep_together(
+        ui,
+        label_width + ui.spacing().item_spacing.x + width + margin,
+    );
     let mut text = ui
         .data(|d| d.get_temp::<String>(id))
         .unwrap_or_else(|| value.clone());
@@ -177,6 +194,15 @@ pub(crate) fn field(
     ui.data_mut(|d| d.remove_temp::<String>(id));
     let cancelled = ui.input(|i| i.key_pressed(Key::Escape));
     (r.lost_focus() && !cancelled && text != value).then_some(text)
+}
+
+/// Beginnt in einer umbrechenden Zeile eine neue Zeile, wenn `width` nicht mehr in die laufende
+/// passt. In nicht umbrechenden Layouts ohne Wirkung.
+pub(crate) fn keep_together(ui: &mut Ui, width: f32) {
+    let at_row_start = ui.cursor().left() <= ui.max_rect().left() + 0.5;
+    if !at_row_start && ui.available_size_before_wrap().x < width {
+        ui.end_row();
+    }
 }
 
 /// Wendet `edit` an: auf das Bezugs-Event `reference` absolut, auf alle anderen in `ids`

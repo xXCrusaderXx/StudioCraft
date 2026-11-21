@@ -7592,6 +7592,40 @@ mod tests {
     }
 
     #[test]
+    fn info_line_wraps_inside_narrow_windows() {
+        let labels = [
+            "Anfang",
+            "Ende",
+            "Länge",
+            "Fade-In",
+            "Fade-Out",
+            "Stumm",
+            "Folgt dem Tempo",
+        ];
+        for width in [800.0, 1024.0] {
+            let (mut w, id) = one_event_window();
+            w.selection = vec![id];
+            let mut h = Harness::builder()
+                .with_size(egui::vec2(width, 600.0))
+                .with_step_dt(1.0 / 60.0)
+                .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
+            h.run_steps(3);
+            let rects: Vec<egui::Rect> = labels.iter().map(|l| h.get_by_label(l).rect()).collect();
+            for (label, r) in labels.iter().zip(&rects) {
+                assert!(
+                    r.right() <= width,
+                    "{label} at {r:?} is cut off in a {width} px window"
+                );
+            }
+            for (i, a) in rects.iter().enumerate() {
+                for b in &rects[i + 1..] {
+                    assert!(!a.shrink(1.0).intersects(b.shrink(1.0)), "{a:?} {b:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn transport_symbols_wind_and_toggle_punch_and_click() {
         let (w, _) = one_event_window();
         let bar = w.bar_ticks();
